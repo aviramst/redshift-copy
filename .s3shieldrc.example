@@ -1,0 +1,19 @@
+{
+    "aws": {
+        "region": "us-standard",
+        "accessKeyId": "myAccessKey",
+        "secretAccessKey": "mySecretAccessKey"
+    },
+    "lru": {
+        "max": 100,
+        "maxAge": 86400000
+    },
+    "gzip": {
+        "enabled": false,
+        "deleteFileAfterUpload": false
+    },
+    "uploadEncoding": "utf8",
+    "faulty": {
+        "failures": 3
+    }
+}
