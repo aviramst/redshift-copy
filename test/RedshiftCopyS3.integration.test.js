@@ -12,14 +12,12 @@ var clientProvider = new clientProviderClass();
 
 var config = rc('test');
 
-console.log(config)
-
 var testFunction = describe;
 var s3Client;
 
 if (!config.aws) {
 	testFunction = describe.skip;
-	console.log('skipping this test since no credentials were supplied (.s3shieldrc and .rsbi4rc)');
+	console.log('skipping this test since no credentials were supplied (.testrc)');
 } else {
 	s3Client = knox.createClient({
 	    key: 		config.aws.accessKeyId,
@@ -30,13 +28,12 @@ if (!config.aws) {
 	});
 }
 
-
 var optionsMock = config.redshiftOptions;
+var rowsMock = [ [1000, '127.0.0.1', 'mockedId'], [2000, '127.0.0.2', 'mockedId2'] ];
+var testFile = '1000|127.0.0.1|mockedId\n2000|127.0.0.2|mockedId2\n';
 
-var rowMock  = [1000, '', '127.0.0.1', 'mockadid', 'mocksubid', 'mockaction'];
-var rowMock2 = [2000, '', '127.0.0.2', 'mock2adid', 'mock2subid', 'mock2action'];
-
-var testFile = '1000||127.0.0.1|mockadid|mocksubid|mockaction\n2000||127.0.0.2|mock2adid|mock2subid|mock2action\n';
+var selectQuery = 'SELECT * FROM ' + config.redshiftOptions.tableName + ' ORDER BY ip ASC;';
+var truncateQuery = 'TRUNCATE TABLE ' + config.redshiftOptions.tableName + ' ;';
 
 testFunction('RedshiftCopyS3', function(){
 	it('should upload file to s3 and load data to datastore', function(done){
@@ -47,35 +44,20 @@ testFunction('RedshiftCopyS3', function(){
 				console.error(err);
 				done(err);
 			} else {
+				console.log('All done!');
 				done(null);
 			}
 		}
 
 		async.waterfall([
 			initTest,
-			truncateTempTable,
-			doBulkInsert4,
+			truncateTestTable,
+			doCopy,
 			verifyUpload,
 			verifyInsertedData
 		], testDone);
 	});
 });
-
-function verifyS3file(services, callback) {
-	assert.strictEqual(services.downloadedFile, testFile);
-}
-
-function verifyInsertedData(services, callback) {
-	services.ds.query(config.redshiftOptions.selectQuery, function(err, result) {
-		if (err) {
-			callback(err);
-			return;
-		}
-		assert.equal(result.rows[1]['ip'], '127.0.0.2');
-		assert.equal(result.rows[0]['ip'], '127.0.0.1');
-		callback(null);
-	});
-}
 
 function initTest(callback) {
 	var services = {};
@@ -85,21 +67,21 @@ function initTest(callback) {
 	});
 }
 
-function truncateTempTable(services, callback) {
-	console.log('Truncating temp table...');
-	services.ds.query(config.redshiftOptions.truncateQuery, function(err, result){
+function truncateTestTable(services, callback) {
+	console.log('Truncating test table...');
+	services.ds.query(truncateQuery, function(err, result){
 		callback(err, services);
 	});
 }
 
-function doBulkInsert4(services, callback) {
-	console.log('doing bulk insert 4...');
+function doCopy(services, callback) {
+	console.log('Doing copy...');
 
 	var rsbl = new RedshiftCopyS3(services.ds, clientProvider, optionsMock, config.aws);
 	services.rsbl = rsbl;
 
 	rsbl.on('flush', function(flushOp){
-		console.log('Flushing...')
+		console.log('Flushing...');
 		flushOp.on('success', function(flushOp){
 			console.log('Flushed.');
 			services.flushOp = flushOp;
@@ -111,15 +93,15 @@ function doBulkInsert4(services, callback) {
 		});
 	});
 
-	rsbl.insert(rowMock);
-	rsbl.insert(rowMock2);
+	rsbl.insert(rowsMock[0]);
+	rsbl.insert(rowsMock[1]);
 }
 
 /*
 	download the file from s3 and compare to test file data
 */
 function verifyUpload(services, callback) {
-	console.log('Verifying upload...');
+	console.log('Verifying file in s3 bucket...');
 	s3Client.getFile(services.flushOp.key, function(err, res) {
 
 		services.downloadedFile = '';
@@ -140,10 +122,25 @@ function verifyUpload(services, callback) {
 			res.on('readable', readMore);
 
 			res.on('end', function () {
+				assert.strictEqual(services.downloadedFile, testFile);
 				callback(null, services);
 			});
 		}
 
 		readResponse();
+	});
+}
+
+function verifyInsertedData(services, callback) {
+	console.log('Verifying data in datastore...')
+	services.ds.query(selectQuery, function(err, result) {
+		if (err) {
+			callback(err);
+			return;
+		}
+		assert.equal(result.rows[0]['ip'], '127.0.0.1');
+		assert.equal(result.rows[1]['ip'], '127.0.0.2');
+
+		callback(null);
 	});
 }
